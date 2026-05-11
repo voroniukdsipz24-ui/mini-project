@@ -1,0 +1,73 @@
+name: CI — Build, Test & Coverage
+
+on:
+  push:
+    branches: [ main, develop, lab35-business-and-persistence, lab36-quality-gate ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore dependencies
+        run: dotnet restore HotelBooking.sln
+
+      - name: Build (Release)
+        run: dotnet build HotelBooking.sln --no-restore -c Release
+
+      # ── Quality Gate: всі тести повинні бути зеленими ────────────────────
+      - name: Run tests with XPlat coverage collector
+        run: |
+          dotnet test HotelBooking.sln \
+            --no-build -c Release \
+            --collect:"XPlat Code Coverage" \
+            --results-directory ./coverage \
+            --logger "trx;LogFileName=results.trx" \
+            --logger "console;verbosity=normal"
+
+      # ── Альтернативний coverage через coverlet.msbuild (для метрик) ───────
+      - name: Run tests with coverlet msbuild (coverage metrics)
+        run: |
+          dotnet test HotelBooking.sln \
+            --no-build -c Release \
+            /p:CollectCoverage=true \
+            /p:CoverletOutputFormat=opencover \
+            /p:CoverletOutput=./coverage/coverage.opencover.xml \
+            /p:Exclude="[*.Console]*%2c[*.Tests]*" \
+            --logger "console;verbosity=minimal"
+
+      - name: Upload coverage report (XPlat)
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-report-xplat
+          path: ./coverage/
+
+      - name: Upload test results (TRX)
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results
+          path: "**/results.trx"
+
+      - name: Quality gate summary
+        if: always()
+        run: |
+          echo "────────────────────────────────────"
+          echo " Quality Gate Summary"
+          echo "────────────────────────────────────"
+          echo " Build:    ✓ Release"
+          echo " Tests:    see results.trx artifact"
+          echo " Coverage: see coverage-report artifact"
+          echo "────────────────────────────────────"
+          echo " Pipeline fails if any test fails."

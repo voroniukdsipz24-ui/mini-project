@@ -1,0 +1,576 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Grand Palais — Система бронювання</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --gold:#C9A84C;--gold-light:#F0D080;--gold-dark:#8A6A20;
+  --cream:#FAF8F3;--ink:#1A1714;--muted:#6B6560;
+  --surface:#FFFFFF;--surface2:#F5F2EC;--border:#E8E3D8;
+  --success:#1D7A4B;--danger:#C0392B;--info:#1A5276;
+  --radius:10px;
+}
+body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--ink);font-size:14px;min-height:100vh}
+.app{display:grid;grid-template-columns:220px 1fr;grid-template-rows:56px 1fr;min-height:100vh}
+.topbar{grid-column:1/-1;display:flex;align-items:center;justify-content:space-between;padding:0 24px;height:56px;background:var(--ink);border-bottom:1px solid #2a2520;position:sticky;top:0;z-index:50}
+.logo{font-family:'DM Serif Display',serif;font-size:18px;color:var(--gold-light);letter-spacing:.03em}
+.logo span{color:#9a9080;font-size:11px;font-family:'DM Sans',sans-serif;margin-left:10px;font-weight:300;letter-spacing:.1em;text-transform:uppercase}
+.topbar-right{display:flex;align-items:center;gap:16px}
+.topbar-date{font-size:12px;color:#9a9080;letter-spacing:.05em}
+.badge-status{font-size:10px;padding:3px 9px;border-radius:20px;letter-spacing:.06em;text-transform:uppercase}
+.badge-status.ok{background:#1a3a2a;color:#5de6a0}
+.badge-status.err{background:#3a1a1a;color:#ff8080}
+.sidebar{background:#F7F5F0;border-right:1px solid var(--border);padding:20px 0;overflow-y:auto}
+.nav-section{padding:0 12px;margin-bottom:24px}
+.nav-label{font-size:10px;color:var(--muted);letter-spacing:.12em;text-transform:uppercase;padding:0 8px;margin-bottom:8px}
+.nav-item{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:8px;cursor:pointer;transition:all .15s;color:var(--muted);font-size:13px;border:none;background:none;width:100%;text-align:left;font-family:inherit}
+.nav-item:hover{background:var(--border);color:var(--ink)}
+.nav-item.active{background:var(--ink);color:var(--gold-light)}
+.nav-dot{width:6px;height:6px;border-radius:50%;background:currentColor;opacity:.5;flex-shrink:0}
+.nav-item.active .nav-dot{opacity:1;background:var(--gold)}
+.main{padding:28px;overflow-y:auto;height:calc(100vh - 56px)}
+.section{display:none}.section.active{display:block}
+.page-header{margin-bottom:24px}
+.page-title{font-family:'DM Serif Display',serif;font-size:24px;color:var(--ink)}
+.page-sub{font-size:12px;color:var(--muted);margin-top:2px}
+.page-header-row{display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:24px}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:28px}
+.stat-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px 18px}
+.stat-label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px}
+.stat-value{font-size:26px;font-weight:300;color:var(--ink);line-height:1}
+.stat-sub{font-size:11px;color:var(--muted);margin-top:4px}
+.stat-card.accent{background:var(--ink);border-color:var(--ink)}
+.stat-card.accent .stat-label,.stat-card.accent .stat-sub{color:#9a9080}
+.stat-card.accent .stat-value{color:var(--gold-light)}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;margin-bottom:20px}
+.card-header{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--border)}
+.card-title{font-size:13px;font-weight:500}
+table{width:100%;border-collapse:collapse}
+th{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;padding:10px 16px;text-align:left;border-bottom:1px solid var(--border);background:#FAFAF8;font-weight:400}
+td{padding:11px 16px;border-bottom:1px solid #F0EDE6;font-size:13px;vertical-align:middle}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:#FAF8F3}
+.badge{display:inline-flex;align-items:center;font-size:11px;padding:2px 9px;border-radius:20px;font-weight:500;letter-spacing:.03em;white-space:nowrap}
+.b-pending{background:#FEF9EC;color:#8A6A20;border:1px solid #F0D080}
+.b-confirmed{background:#EAF4FF;color:#1A5276;border:1px solid #AED6F1}
+.b-checkedin{background:#E8FAF0;color:#1D7A4B;border:1px solid #A9DFBF}
+.b-checkedout{background:#F5F2EC;color:#6B6560;border:1px solid #D5CFC4}
+.b-cancelled{background:#FDEAEA;color:#C0392B;border:1px solid #F5B7B1}
+.b-available{background:#E8FAF0;color:#1D7A4B;border:1px solid #A9DFBF}
+.b-reserved{background:#FEF9EC;color:#8A6A20;border:1px solid #F0D080}
+.b-occupied{background:#FDEAEA;color:#C0392B;border:1px solid #F5B7B1}
+.b-maintenance{background:#F5F2EC;color:#6B6560;border:1px solid #D5CFC4}
+.b-standard{background:#F5F2EC;color:#5a5550}
+.b-deluxe{background:#EAF4FF;color:#1A5276}
+.b-suite{background:#F0EBF8;color:#5B2C6F}
+.b-penthouse{background:#FEF9EC;color:#8A6A20}
+.b-paid{background:#E8FAF0;color:#1D7A4B}
+.b-unpaid{background:#FEF9EC;color:#8A6A20}
+.b-partiallypaid{background:#EAF4FF;color:#1A5276}
+.btn{display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border-radius:7px;font-size:12px;font-weight:500;cursor:pointer;transition:all .15s;border:1px solid transparent;font-family:inherit;white-space:nowrap}
+.btn-primary{background:var(--ink);color:var(--gold-light);border-color:var(--ink)}
+.btn-primary:hover{background:#2a2520}
+.btn-ghost{background:none;color:var(--muted);border-color:var(--border)}
+.btn-ghost:hover{background:var(--surface2);color:var(--ink)}
+.btn-danger{background:#FEF0EF;color:var(--danger);border-color:#F5B7B1}
+.btn-success{background:#E8FAF0;color:var(--success);border-color:#A9DFBF}
+.btn-info{background:#EAF4FF;color:var(--info);border-color:#AED6F1}
+.btn-sm{padding:5px 10px;font-size:11px}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.modal-bg{position:fixed;inset:0;background:rgba(26,23,20,.55);z-index:100;display:none;align-items:center;justify-content:center}
+.modal-bg.open{display:flex}
+.modal{background:var(--surface);border-radius:14px;padding:28px;width:500px;max-width:96vw;max-height:90vh;overflow-y:auto;box-shadow:0 8px 48px rgba(0,0,0,.2)}
+.modal-title{font-family:'DM Serif Display',serif;font-size:20px;margin-bottom:20px;color:var(--ink)}
+.form-row{margin-bottom:14px}
+.form-row label{display:block;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:5px}
+.form-row input,.form-row select{width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:7px;font-size:13px;font-family:inherit;background:var(--cream);color:var(--ink);outline:none;transition:border .15s}
+.form-row input:focus,.form-row select:focus{border-color:var(--gold)}
+.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.modal-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:20px;padding-top:16px;border-top:1px solid var(--border)}
+.filter-bar{display:flex;gap:10px;margin-bottom:16px;align-items:center;flex-wrap:wrap}
+.filter-bar input,.filter-bar select{padding:7px 12px;border:1px solid var(--border);border-radius:7px;font-size:12px;font-family:inherit;background:var(--surface);color:var(--ink);outline:none}
+.filter-bar input:focus,.filter-bar select:focus{border-color:var(--gold)}
+.filter-bar input[type=text]{flex:1;min-width:160px}
+.rooms-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(175px,1fr));gap:14px}
+.room-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px;transition:all .15s}
+.room-card.available:hover{border-color:var(--gold);box-shadow:0 2px 16px rgba(26,23,20,.08)}
+.room-num{font-family:'DM Serif Display',serif;font-size:22px;color:var(--ink)}
+.room-type{font-size:11px;color:var(--muted);margin:3px 0 8px;text-transform:uppercase;letter-spacing:.07em}
+.room-meta{display:flex;align-items:center;justify-content:space-between;margin-top:8px}
+.empty{text-align:center;padding:48px 20px;color:var(--muted)}
+.empty-text{font-size:13px}
+.report-row{display:flex;align-items:center;gap:14px;padding:9px 0;border-bottom:1px solid #F0EDE6}
+.report-row:last-child{border-bottom:none}
+.report-name{width:140px;font-size:12px;color:var(--ink);flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.report-bar-wrap{flex:1;background:#F0EDE6;border-radius:4px;height:8px;overflow:hidden}
+.report-bar{height:8px;border-radius:4px;background:var(--ink);transition:width .5s}
+.report-val{width:90px;text-align:right;font-size:12px;color:var(--muted);flex-shrink:0}
+.toast{position:fixed;bottom:24px;right:24px;padding:12px 20px;border-radius:10px;font-size:13px;z-index:200;opacity:0;transform:translateY(10px);transition:all .25s;pointer-events:none;max-width:360px}
+.toast.show{opacity:1;transform:translateY(0)}
+.toast.ok{background:var(--ink);color:var(--gold-light)}
+.toast.err{background:#7a1a1a;color:#ffaaaa}
+.price-preview{background:var(--cream);border-radius:7px;padding:10px 14px;font-size:13px;margin-bottom:8px;min-height:38px;color:var(--muted)}
+::-webkit-scrollbar{width:6px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:#D5CFC4;border-radius:3px}
+</style>
+</head>
+<body>
+<div class="app">
+<div class="topbar">
+  <div style="display:flex;align-items:center;gap:20px"><div class="logo">Grand Palais <span>HMS v2.0</span></div></div>
+  <div class="topbar-right">
+    <div class="topbar-date" id="cur-date"></div>
+    <div class="badge-status ok" id="api-status">● API</div>
+  </div>
+</div>
+
+<div class="sidebar">
+  <div class="nav-section">
+    <div class="nav-label">Головна</div>
+    <button class="nav-item active" onclick="go('dashboard',this)"><span class="nav-dot"></span>Дашборд</button>
+    <button class="nav-item" onclick="go('bookings',this)"><span class="nav-dot"></span>Бронювання</button>
+    <button class="nav-item" onclick="go('rooms',this)"><span class="nav-dot"></span>Номери</button>
+    <button class="nav-item" onclick="go('guests',this)"><span class="nav-dot"></span>Гості</button>
+  </div>
+  <div class="nav-section">
+    <div class="nav-label">Аналітика</div>
+    <button class="nav-item" onclick="go('reports',this)"><span class="nav-dot"></span>Звіти</button>
+  </div>
+  <div class="nav-section">
+    <div class="nav-label">Дії</div>
+    <button class="nav-item" onclick="openModal('m-booking')"><span class="nav-dot"></span>Нове бронювання</button>
+    <button class="nav-item" onclick="openModal('m-guest')"><span class="nav-dot"></span>Новий гість</button>
+  </div>
+</div>
+
+<div class="main">
+  <div id="s-dashboard" class="section active">
+    <div class="page-header"><div class="page-title">Дашборд</div><div class="page-sub">Поточний стан готелю</div></div>
+    <div class="stats" id="stats-grid"></div>
+    <div class="card">
+      <div class="card-header"><span class="card-title">Останні бронювання</span>
+        <button class="btn btn-ghost btn-sm" onclick="go('bookings',document.querySelectorAll('.nav-item')[1])">Всі →</button>
+      </div>
+      <table><thead><tr><th>#</th><th>Гість</th><th>Номер</th><th>Заїзд</th><th>Виїзд</th><th>Статус</th><th>Сума</th></tr></thead>
+      <tbody id="dash-bk"></tbody></table>
+    </div>
+  </div>
+
+  <div id="s-bookings" class="section">
+    <div class="page-header-row">
+      <div><div class="page-title">Бронювання</div><div class="page-sub">Управління всіма бронюваннями</div></div>
+      <button class="btn btn-primary" onclick="openModal('m-booking')">+ Нове бронювання</button>
+    </div>
+    <div class="filter-bar">
+      <input type="text" placeholder="Пошук по гостю або номеру…" id="bk-q" oninput="renderBookings()">
+      <select id="bk-st" onchange="renderBookings()">
+        <option value="">Всі статуси</option>
+        <option value="Pending">Очікує</option>
+        <option value="Confirmed">Підтверджено</option>
+        <option value="CheckedIn">Заселений</option>
+        <option value="CheckedOut">Виїхав</option>
+        <option value="Cancelled">Скасовано</option>
+      </select>
+    </div>
+    <div class="card">
+      <table><thead><tr><th>#</th><th>Гість</th><th>Номер</th><th>Заїзд</th><th>Виїзд</th><th>Ноч.</th><th>Статус</th><th>Оплата</th><th>Сума</th><th>Дії</th></tr></thead>
+      <tbody id="bk-tbody"></tbody></table>
+    </div>
+  </div>
+
+  <div id="s-rooms" class="section">
+    <div class="page-header"><div class="page-title">Номери</div><div class="page-sub">Стан номерного фонду</div></div>
+    <div class="filter-bar">
+      <select id="rm-t" onchange="renderRooms()">
+        <option value="">Всі типи</option>
+        <option value="Standard">Стандарт</option>
+        <option value="Deluxe">Делюкс</option>
+        <option value="Suite">Люкс</option>
+        <option value="Penthouse">Пентхаус</option>
+      </select>
+      <select id="rm-s" onchange="renderRooms()">
+        <option value="">Всі статуси</option>
+        <option value="Available">Вільний</option>
+        <option value="Reserved">Заброньований</option>
+        <option value="Occupied">Зайнятий</option>
+        <option value="Maintenance">Обслуговування</option>
+      </select>
+    </div>
+    <div class="rooms-grid" id="rooms-grid"></div>
+  </div>
+
+  <div id="s-guests" class="section">
+    <div class="page-header-row">
+      <div><div class="page-title">Гості</div><div class="page-sub">Реєстр гостей готелю</div></div>
+      <button class="btn btn-primary" onclick="openModal('m-guest')">+ Новий гість</button>
+    </div>
+    <div class="filter-bar"><input type="text" id="g-q" placeholder="Пошук по імені або email…" oninput="renderGuests()"></div>
+    <div class="card">
+      <table><thead><tr><th>#</th><th>Ім'я</th><th>Email</th><th>Телефон</th><th>Паспорт</th><th>Бронювань</th></tr></thead>
+      <tbody id="g-tbody"></tbody></table>
+    </div>
+  </div>
+
+  <div id="s-reports" class="section">
+    <div class="page-header"><div class="page-title">Звіти</div><div class="page-sub">Аналітика та статистика</div></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
+      <div class="card"><div class="card-header"><span class="card-title">Дохід за типами номерів</span></div><div style="padding:14px 18px" id="rep-types"></div></div>
+      <div class="card"><div class="card-header"><span class="card-title">ТОП гостей за витратами</span></div><div style="padding:14px 18px" id="rep-guests"></div></div>
+      <div class="card" style="grid-column:1/-1">
+        <div class="card-header"><span class="card-title">Зайнятість за місяцями</span></div>
+        <div style="padding:16px 18px;display:grid;grid-template-columns:repeat(12,1fr);gap:6px;align-items:end;height:140px" id="rep-chart"></div>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+
+<div id="m-booking" class="modal-bg">
+<div class="modal">
+  <div class="modal-title">Нове бронювання</div>
+  <div class="form-row"><label>Гість</label><select id="nb-guest"></select></div>
+  <div class="form-row"><label>Номер</label><select id="nb-room" onchange="updatePreview()"></select></div>
+  <div class="form-grid">
+    <div class="form-row"><label>Дата заїзду</label><input type="date" id="nb-ci" onchange="updatePreview()"></div>
+    <div class="form-row"><label>Дата виїзду</label><input type="date" id="nb-co" onchange="updatePreview()"></div>
+  </div>
+  <div class="price-preview" id="nb-preview">Оберіть номер та дати для розрахунку вартості</div>
+  <div class="modal-actions">
+    <button class="btn btn-ghost" onclick="closeModal('m-booking')">Скасувати</button>
+    <button class="btn btn-primary" id="nb-btn" onclick="createBooking()">Створити бронювання</button>
+  </div>
+</div>
+</div>
+
+<div id="m-guest" class="modal-bg">
+<div class="modal">
+  <div class="modal-title">Реєстрація гостя</div>
+  <div class="form-grid">
+    <div class="form-row"><label>Ім'я *</label><input type="text" id="ng-fn" placeholder="Олена"></div>
+    <div class="form-row"><label>Прізвище *</label><input type="text" id="ng-ln" placeholder="Шевченко"></div>
+  </div>
+  <div class="form-row"><label>Email *</label><input type="email" id="ng-em" placeholder="email@example.com"></div>
+  <div class="form-grid">
+    <div class="form-row"><label>Телефон</label><input type="text" id="ng-ph" placeholder="+380501234567"></div>
+    <div class="form-row"><label>Паспорт</label><input type="text" id="ng-pp" placeholder="AA123456"></div>
+  </div>
+  <div class="form-row"><label>Дата народження</label><input type="date" id="ng-db"></div>
+  <div class="modal-actions">
+    <button class="btn btn-ghost" onclick="closeModal('m-guest')">Скасувати</button>
+    <button class="btn btn-primary" onclick="createGuest()">Зареєструвати</button>
+  </div>
+</div>
+</div>
+
+<div id="m-cancel" class="modal-bg">
+<div class="modal" style="width:420px">
+  <div class="modal-title">Скасувати бронювання</div>
+  <div style="font-size:13px;color:var(--muted);margin-bottom:14px">Ви впевнені, що хочете скасувати це бронювання? Номер стане вільним.</div>
+  <div class="form-row"><label>Причина (необов'язково)</label><input type="text" id="cn-reason" placeholder="Наприклад: гість передумав"></div>
+  <div class="modal-actions">
+    <button class="btn btn-ghost" onclick="closeModal('m-cancel')">Не скасовувати</button>
+    <button class="btn btn-danger" onclick="confirmCancel()">Так, скасувати</button>
+  </div>
+</div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+let state = { bookings:[], rooms:[], guests:[] };
+const SEASON_MULT = m => [6,7,8,12].includes(m)?1.25:[3,4,9,10].includes(m)?1.10:1.0;
+
+async function api(path, opts={}) {
+  const r = await fetch(path, {headers:{'Content-Type':'application/json'},...opts});
+  if (!r.ok) { const e = await r.json().catch(()=>({error:r.statusText})); throw new Error(e.error||r.statusText); }
+  return r.status === 204 ? null : r.json();
+}
+
+async function loadAll() {
+  try {
+    const [b,r,g] = await Promise.all([api('/api/bookings'), api('/api/rooms'), api('/api/guests')]);
+    state.bookings = b; state.rooms = r; state.guests = g;
+    document.getElementById('api-status').className='badge-status ok';
+    document.getElementById('api-status').textContent='● Online';
+  } catch {
+    document.getElementById('api-status').className='badge-status err';
+    document.getElementById('api-status').textContent='● Offline';
+  }
+}
+
+function gn(id){const g=state.guests.find(x=>x.id===id);return g?`${g.firstName} ${g.lastName}`:'—'}
+function rn(id){const r=state.rooms.find(x=>x.id===id);return r?`№${r.number}`:'—'}
+function nights(ci,co){return Math.max(0,Math.round((new Date(co)-new Date(ci))/86400000))}
+function fmt(d){if(!d)return'—';const p=String(d).split('T')[0].split('-');return`${p[2]}.${p[1]}.${p[0]}`}
+function today(){return new Date().toISOString().split('T')[0]}
+
+// Українські підписи статусів і станів
+const STATUS_LABELS = {
+  Pending:    'Очікує',
+  Confirmed:  'Підтверджено',
+  CheckedIn:  'Заселений',
+  CheckedOut: 'Виїхав',
+  Cancelled:  'Скасовано'
+};
+const PAYMENT_LABELS = {
+  Unpaid:        'Не оплачено',
+  PartiallyPaid: 'Частково',
+  Paid:          'Оплачено',
+  Refunded:      'Повернено'
+};
+const ROOM_STATUS_LABELS = {
+  Available:   'Вільний',
+  Reserved:    'Заброньований',
+  Occupied:    'Зайнятий',
+  Maintenance: 'Обслуговування'
+};
+const ROOM_TYPE_LABELS = {
+  Standard:  'Стандарт',
+  Deluxe:    'Делюкс',
+  Suite:     'Люкс',
+  Penthouse: 'Пентхаус'
+};
+
+function badge(cls,txt){return`<span class="badge b-${String(cls).toLowerCase()}">${txt}</span>`}
+function statusBadge(s){return badge(s, STATUS_LABELS[s] || s);}
+function paymentBadge(p){return badge(p, PAYMENT_LABELS[p] || p || '—');}
+function roomStatusBadge(s){return badge(s, ROOM_STATUS_LABELS[s] || s);}
+function roomTypeBadge(t){return badge(t, ROOM_TYPE_LABELS[t] || t);}
+
+function calcPrice(room,ci,co){
+  const n=nights(ci,co); if(n<=0)return 0;
+  const m=new Date(ci).getMonth()+1;
+  return Math.round(room.price*n*SEASON_MULT(m));
+}
+
+function go(sec,el){
+  document.querySelectorAll('.section').forEach(x=>x.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(x=>x.classList.remove('active'));
+  document.getElementById('s-'+sec).classList.add('active');
+  el.classList.add('active');
+  loadAll().then(()=>{
+    if(sec==='dashboard')renderDashboard();
+    if(sec==='bookings')renderBookings();
+    if(sec==='rooms')renderRooms();
+    if(sec==='guests')renderGuests();
+    if(sec==='reports')renderReports();
+  });
+}
+
+function renderDashboard(){
+  const occ=state.rooms.filter(r=>r.status==='Occupied'||r.status==='Reserved').length;
+  const active=state.bookings.filter(b=>['Confirmed','CheckedIn'].includes(b.status)).length;
+  const rev=state.bookings.filter(b=>b.status!=='Cancelled').reduce((s,b)=>s+(b.totalPrice||0),0);
+  document.getElementById('stats-grid').innerHTML=`
+    <div class="stat-card accent"><div class="stat-label">Завантаженість</div><div class="stat-value">${state.rooms.length?Math.round(occ/state.rooms.length*100):0}%</div><div class="stat-sub">${occ} з ${state.rooms.length} номерів</div></div>
+    <div class="stat-card"><div class="stat-label">Активних броней</div><div class="stat-value">${active}</div><div class="stat-sub">Confirmed + CheckedIn</div></div>
+    <div class="stat-card"><div class="stat-label">Гостей</div><div class="stat-value">${state.guests.length}</div><div class="stat-sub">зареєстровано</div></div>
+    <div class="stat-card"><div class="stat-label">Загальний дохід</div><div class="stat-value">${Math.round(rev).toLocaleString()}</div><div class="stat-sub">грн</div></div>`;
+  const rows=[...state.bookings].reverse().slice(0,6).map(b=>`<tr>
+    <td>#${b.id}</td><td>${gn(b.guestId)}</td><td>${rn(b.roomId)}</td>
+    <td>${fmt(b.checkInDate)}</td><td>${fmt(b.checkOutDate)}</td>
+    <td>${statusBadge(b.status)}</td><td><b>${Math.round(b.totalPrice||0).toLocaleString()}</b> грн</td>
+  </tr>`).join('');
+  document.getElementById('dash-bk').innerHTML=rows||`<tr><td colspan="7"><div class="empty"><div class="empty-text">Бронювань ще немає</div></div></td></tr>`;
+}
+
+function renderBookings(){
+  const q=(document.getElementById('bk-q').value||'').toLowerCase();
+  const st=document.getElementById('bk-st').value;
+  const list=state.bookings.filter(b=>{
+    if(q&&!gn(b.guestId).toLowerCase().includes(q)&&!rn(b.roomId).toLowerCase().includes(q))return false;
+    if(st&&b.status!==st)return false;
+    return true;
+  });
+  const rows=list.map(b=>{
+    const btns=[];
+    if(b.status==='Pending')
+      btns.push(`<button class="btn btn-primary btn-sm" onclick="doAction(${b.id},'confirm')" title="Підтвердити бронювання">✓ Підтвердити</button>`);
+    if(b.status==='Confirmed')
+      btns.push(`<button class="btn btn-success btn-sm" onclick="doAction(${b.id},'checkin')" title="Гість прибув, заселити">→ Заселити</button>`);
+    if(b.status==='CheckedIn')
+      btns.push(`<button class="btn btn-info btn-sm" onclick="doAction(${b.id},'checkout')" title="Гість виїжджає, оформити виїзд">← Виселити</button>`);
+    if(['Pending','Confirmed'].includes(b.status))
+      btns.push(`<button class="btn btn-danger btn-sm" onclick="doCancel(${b.id})" title="Скасувати бронювання">✕ Скасувати</button>`);
+    return`<tr>
+      <td>#${b.id}</td><td>${gn(b.guestId)}</td><td>${rn(b.roomId)}</td>
+      <td>${fmt(b.checkInDate)}</td><td>${fmt(b.checkOutDate)}</td><td>${nights(b.checkInDate,b.checkOutDate)}</td>
+      <td>${statusBadge(b.status)}</td>
+      <td>${paymentBadge(b.paymentStatus)}</td>
+      <td><b>${Math.round(b.totalPrice||0).toLocaleString()}</b> грн</td>
+      <td style="white-space:nowrap">${btns.join(' ')||'—'}</td>
+    </tr>`;
+  }).join('');
+  document.getElementById('bk-tbody').innerHTML=rows||`<tr><td colspan="10"><div class="empty"><div class="empty-text">Нічого не знайдено</div></div></td></tr>`;
+}
+
+async function doAction(id, action){
+  const messages = {
+    confirm:  'Бронювання підтверджено',
+    checkin:  'Гість заселений',
+    checkout: 'Гість виселений, оплата проведена'
+  };
+  try {
+    await api(`/api/bookings/${id}/${action}`,{method:'PUT'});
+    toast(messages[action] || 'Готово');
+    await loadAll(); renderBookings(); renderDashboard();
+  } catch(e){ toast(e.message,true); }
+}
+let pendingCancelId = null;
+function doCancel(id){
+  pendingCancelId = id;
+  document.getElementById('cn-reason').value = '';
+  document.getElementById('m-cancel').classList.add('open');
+}
+async function confirmCancel(){
+  if(!pendingCancelId)return;
+  const reason = document.getElementById('cn-reason').value.trim() || 'admin';
+  try {
+    await api(`/api/bookings/${pendingCancelId}?reason=${encodeURIComponent(reason)}`,{method:'DELETE'});
+    closeModal('m-cancel');
+    toast('Бронювання скасовано');
+    pendingCancelId = null;
+    await loadAll(); renderBookings(); renderDashboard();
+  } catch(e){ toast(e.message,true); }
+}
+
+function renderRooms(){
+  const t=document.getElementById('rm-t').value;
+  const s=document.getElementById('rm-s').value;
+  const list=state.rooms.filter(r=>(!t||r.type===t)&&(!s||r.status===s));
+  document.getElementById('rooms-grid').innerHTML=list.map(r=>`
+    <div class="room-card ${(r.status||'').toLowerCase()}">
+      <div class="room-num">${r.number}</div>
+      <div class="room-type">${ROOM_TYPE_LABELS[r.type]||r.type} · Поверх ${r.floor}</div>
+      <div style="margin-bottom:8px">${roomStatusBadge(r.status)}</div>
+      <div class="room-meta">
+        <span style="font-size:13px;font-weight:500">${r.pricePerNight} грн/ніч</span>
+        <span style="font-size:11px;color:var(--muted)">👤 ${r.capacity}</span>
+      </div>
+      <div style="font-size:11px;color:var(--muted);margin-top:6px">${r.description||''}</div>
+    </div>`).join('')||`<div style="grid-column:1/-1"><div class="empty"><div class="empty-text">Номерів не знайдено</div></div></div>`;
+}
+
+function renderGuests(){
+  const q=(document.getElementById('g-q').value||'').toLowerCase();
+  const list=state.guests.filter(g=>!q||`${g.firstName} ${g.lastName} ${g.email}`.toLowerCase().includes(q));
+  const rows=list.map(g=>{
+    const cnt=state.bookings.filter(b=>b.guestId===g.id).length;
+    return`<tr>
+      <td>#${g.id}</td><td><b>${g.firstName} ${g.lastName}</b></td>
+      <td style="color:var(--muted)">${g.email}</td><td>${g.phone||''}</td><td>${g.passportNumber||''}</td>
+      <td>${badge('confirmed',cnt)}</td>
+    </tr>`;
+  }).join('');
+  document.getElementById('g-tbody').innerHTML=rows||`<tr><td colspan="6"><div class="empty"><div class="empty-text">Гостей не знайдено</div></div></td></tr>`;
+}
+
+function renderReports(){
+  const typeRev={};
+  state.bookings.filter(b=>b.status!=='Cancelled').forEach(b=>{
+    const r=state.rooms.find(x=>x.id===b.roomId);
+    if(r){typeRev[r.type]=(typeRev[r.type]||0)+(b.totalPrice||0);}
+  });
+  const maxR=Math.max(...Object.values(typeRev),1);
+  document.getElementById('rep-types').innerHTML=Object.entries(typeRev).sort((a,b)=>b[1]-a[1])
+    .map(([t,v])=>`<div class="report-row"><div class="report-name">${roomTypeBadge(t)}</div>
+      <div class="report-bar-wrap"><div class="report-bar" style="width:${Math.round(v/maxR*100)}%"></div></div>
+      <div class="report-val">${Math.round(v).toLocaleString()} грн</div></div>`).join('')
+    ||'<div style="color:var(--muted);font-size:13px;padding:8px 0">Немає даних</div>';
+
+  const gs={};
+  state.bookings.filter(b=>b.status!=='Cancelled').forEach(b=>{gs[b.guestId]=(gs[b.guestId]||0)+(b.totalPrice||0);});
+  const maxG=Math.max(...Object.values(gs),1);
+  document.getElementById('rep-guests').innerHTML=Object.entries(gs).sort((a,b)=>b[1]-a[1]).slice(0,5)
+    .map(([id,v])=>`<div class="report-row"><div class="report-name">${gn(+id)}</div>
+      <div class="report-bar-wrap"><div class="report-bar" style="width:${Math.round(v/maxG*100)}%;background:var(--gold-dark)"></div></div>
+      <div class="report-val">${Math.round(v).toLocaleString()} грн</div></div>`).join('')
+    ||'<div style="color:var(--muted);font-size:13px;padding:8px 0">Немає даних</div>';
+
+  const mn=['Січ','Лют','Бер','Кві','Тра','Чер','Лип','Сер','Вер','Жов','Лис','Гру'];
+  const occ=Array(12).fill(0);
+  state.bookings.filter(b=>b.status!=='Cancelled').forEach(b=>{
+    if(b.checkInDate)occ[new Date(b.checkInDate).getMonth()]+=nights(b.checkInDate,b.checkOutDate);
+  });
+  const maxO=Math.max(...occ,1);
+  document.getElementById('rep-chart').innerHTML=mn.map((m,i)=>`
+    <div style="display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;gap:4px">
+      <div style="font-size:10px;color:var(--muted)">${occ[i]||''}</div>
+      <div style="width:100%;background:var(--ink);border-radius:3px 3px 0 0;height:${Math.round(occ[i]/maxO*80)}px;min-height:${occ[i]?3:0}px;transition:height .5s"></div>
+      <div style="font-size:10px;color:var(--muted)">${m}</div>
+    </div>`).join('');
+}
+
+function openModal(id){
+  if(id==='m-booking'){
+    document.getElementById('nb-guest').innerHTML=state.guests.map(g=>`<option value="${g.id}">${g.firstName} ${g.lastName}</option>`).join('');
+    const avail=state.rooms.filter(r=>r.status==='Available');
+    document.getElementById('nb-room').innerHTML=avail.map(r=>`<option value="${r.id}">№${r.number} — ${ROOM_TYPE_LABELS[r.type]||r.type} (${r.pricePerNight} грн/ніч)</option>`).join('');
+    document.getElementById('nb-ci').value=today();
+    document.getElementById('nb-co').value=new Date(Date.now()+3*86400000).toISOString().split('T')[0];
+    updatePreview();
+  }
+  document.getElementById(id).classList.add('open');
+}
+function closeModal(id){document.getElementById(id).classList.remove('open');}
+document.querySelectorAll('.modal-bg').forEach(m=>m.addEventListener('click',e=>{if(e.target===m)m.classList.remove('open');}));
+
+function updatePreview(){
+  const rId=+document.getElementById('nb-room').value;
+  const ci=document.getElementById('nb-ci').value;
+  const co=document.getElementById('nb-co').value;
+  const room=state.rooms.find(r=>r.id===rId);
+  if(!room||!ci||!co){document.getElementById('nb-preview').textContent='Оберіть номер та дати';return;}
+  const n=nights(ci,co);
+  if(n<=0){document.getElementById('nb-preview').textContent='Дата виїзду має бути пізніше заїзду';return;}
+  const p=calcPrice({price:room.pricePerNight,type:room.type},ci,co);
+  const m=new Date(ci).getMonth()+1; const sm=SEASON_MULT(m);
+  document.getElementById('nb-preview').innerHTML=`${n} ніч(і) × ${room.pricePerNight} грн × ${sm}× (сезон) = <b style="color:var(--ink)">${p.toLocaleString()} грн</b>`;
+}
+
+async function createBooking(){
+  const guestId=+document.getElementById('nb-guest').value;
+  const roomId=+document.getElementById('nb-room').value;
+  const checkIn=document.getElementById('nb-ci').value;
+  const checkOut=document.getElementById('nb-co').value;
+  if(!guestId||!roomId||!checkIn||!checkOut){toast('Заповніть всі поля',true);return;}
+  if(nights(checkIn,checkOut)<=0){toast('Виїзд має бути після заїзду',true);return;}
+  const btn=document.getElementById('nb-btn');btn.disabled=true;
+  try {
+    await api('/api/bookings',{method:'POST',body:JSON.stringify({guestId,roomId,checkIn:checkIn+'T00:00:00',checkOut:checkOut+'T00:00:00'})});
+    closeModal('m-booking'); toast('Бронювання створено!');
+    await loadAll(); renderBookings(); renderDashboard();
+  } catch(e){ toast(e.message,true); } finally{btn.disabled=false;}
+}
+
+async function createGuest(){
+  const fn=document.getElementById('ng-fn').value.trim();
+  const ln=document.getElementById('ng-ln').value.trim();
+  const em=document.getElementById('ng-em').value.trim();
+  const ph=document.getElementById('ng-ph').value.trim();
+  const pp=document.getElementById('ng-pp').value.trim();
+  const db=document.getElementById('ng-db').value;
+  if(!fn||!ln||!em||!em.includes('@')){toast('Заповніть ім\'я, прізвище та email',true);return;}
+  try {
+    await api('/api/guests',{method:'POST',body:JSON.stringify({firstName:fn,lastName:ln,email:em,phone:ph,passport:pp,dateOfBirth:db||'1990-01-01T00:00:00'})});
+    closeModal('m-guest'); toast('Гостя зареєстровано!');
+    ['ng-fn','ng-ln','ng-em','ng-ph','ng-pp','ng-db'].forEach(id=>document.getElementById(id).value='');
+    await loadAll(); renderGuests(); renderDashboard();
+  } catch(e){ toast(e.message,true); }
+}
+
+let toastT;
+function toast(msg,err=false){
+  const el=document.getElementById('toast');
+  el.textContent=msg; el.className=`toast ${err?'err':'ok'} show`;
+  clearTimeout(toastT); toastT=setTimeout(()=>el.classList.remove('show'),3200);
+}
+
+document.getElementById('cur-date').textContent=new Date().toLocaleDateString('uk-UA',{weekday:'short',day:'numeric',month:'long',year:'numeric'});
+loadAll().then(()=>renderDashboard());
+</script>
+</body>
+</html>
