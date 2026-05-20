@@ -6,15 +6,32 @@ using HotelBooking.Domain.Services;
 namespace HotelBooking.Application.Services;
 
 /// <summary>
-/// Orchestrates booking use-cases. Depends only on domain interfaces (DIP).
+/// Сервіс бізнес-логіки бронювань: оркеструє use cases і нотифікує спостерігачів.
+/// Залежить лише від інтерфейсів Domain (DIP) — InMemory чи JSON UoW взаємозамінні.
+/// Observer pattern: випускає <see cref="BookingEvent"/> через колекцію <see cref="IBookingEventHandler"/>.
 /// </summary>
 public class BookingService
 {
     private readonly IUnitOfWork _uow;
+    private readonly IEnumerable<IBookingEventHandler> _handlers;
 
-    public BookingService(IUnitOfWork uow) => _uow = uow;
+    /// <summary>
+    /// Конструктор. Handlers необов'язкові — якщо порожні, події просто не публікуються.
+    /// </summary>
+    public BookingService(IUnitOfWork uow, IEnumerable<IBookingEventHandler>? handlers = null)
+    {
+        _uow = uow;
+        _handlers = handlers ?? Array.Empty<IBookingEventHandler>();
+    }
 
-    // USE CASE 1: Create booking
+    /// <summary>
+    /// Створює нове бронювання з перевірками: існування гостя/номера,
+    /// доступність номера, відсутність конфліктів дат. Розраховує ціну
+    /// через <see cref="PricingEngine"/> і резервує номер.
+    /// </summary>
+    /// <exception cref="GuestNotFoundException">Гостя з таким Id не існує.</exception>
+    /// <exception cref="RoomNotFoundException">Номера з таким Id не існує.</exception>
+    /// <exception cref="RoomNotAvailableException">Номер недоступний або є конфлікт дат.</exception>
     public async Task<Booking> CreateBookingAsync(
         int guestId, int roomId, DateTime checkIn, DateTime checkOut)
     {
@@ -27,7 +44,6 @@ public class BookingService
         if (!room.IsAvailable())
             throw new RoomNotAvailableException(roomId, checkIn, checkOut);
 
-        // Check for date conflicts with existing bookings
         var conflicts = await _uow.Bookings.GetByRoomIdAsync(roomId);
         bool hasConflict = conflicts
             .Where(b => b.Status is not BookingStatus.Cancelled and not BookingStatus.CheckedOut)
@@ -49,83 +65,100 @@ public class BookingService
         await _uow.Rooms.UpdateAsync(room);
         await _uow.SaveAsync();
 
+        await NotifyAsync(new BookingEvent(booking.Id, BookingStatus.Pending, null, DateTime.UtcNow, "Booking created"));
         return booking;
     }
 
-    // USE CASE 2: Confirm booking
-    public async Task<Booking> ConfirmBookingAsync(int bookingId)
+    /// <summary>Підтверджує бронювання (Pending → Confirmed).</summary>
+    public async Task<Booking> ConfirmBookingAsync(int id)
     {
-        var booking = await GetOrThrowAsync(bookingId);
-        booking.Confirm();
-        await _uow.Bookings.UpdateAsync(booking);
+        var b = await GetOrThrow(id);
+        var prev = b.Status;
+        b.Confirm();
+        await _uow.Bookings.UpdateAsync(b);
         await _uow.SaveAsync();
-        return booking;
+        await NotifyAsync(new BookingEvent(b.Id, b.Status, prev, DateTime.UtcNow));
+        return b;
     }
 
-    // USE CASE 3: Check-in
-    public async Task<Booking> CheckInAsync(int bookingId)
+    /// <summary>Заселяє гостя (Confirmed → CheckedIn), номер → Occupied.</summary>
+    public async Task<Booking> CheckInAsync(int id)
     {
-        var booking = await GetOrThrowAsync(bookingId);
-        booking.CheckIn();
-
-        var room = await _uow.Rooms.GetByIdAsync(booking.RoomId);
+        var b = await GetOrThrow(id);
+        var prev = b.Status;
+        b.CheckIn();
+        var room = await _uow.Rooms.GetByIdAsync(b.RoomId);
         if (room != null)
         {
             room.SetStatus(RoomStatus.Occupied);
             await _uow.Rooms.UpdateAsync(room);
         }
-
-        await _uow.Bookings.UpdateAsync(booking);
+        await _uow.Bookings.UpdateAsync(b);
         await _uow.SaveAsync();
-        return booking;
+        await NotifyAsync(new BookingEvent(b.Id, b.Status, prev, DateTime.UtcNow));
+        return b;
     }
 
-    // USE CASE 4: Check-out
-    public async Task<Booking> CheckOutAsync(int bookingId)
+    /// <summary>Виселяє гостя (CheckedIn → CheckedOut, оплата → Paid), номер → Available.</summary>
+    public async Task<Booking> CheckOutAsync(int id)
     {
-        var booking = await GetOrThrowAsync(bookingId);
-        booking.CheckOut();
-        booking.MarkPaid();
-
-        var room = await _uow.Rooms.GetByIdAsync(booking.RoomId);
+        var b = await GetOrThrow(id);
+        var prev = b.Status;
+        b.CheckOut();
+        var room = await _uow.Rooms.GetByIdAsync(b.RoomId);
         if (room != null)
         {
             room.SetStatus(RoomStatus.Available);
             await _uow.Rooms.UpdateAsync(room);
         }
-
-        await _uow.Bookings.UpdateAsync(booking);
+        await _uow.Bookings.UpdateAsync(b);
         await _uow.SaveAsync();
-        return booking;
+        await NotifyAsync(new BookingEvent(b.Id, b.Status, prev, DateTime.UtcNow));
+        return b;
     }
 
-    // USE CASE 5: Cancel booking
-    public async Task<Booking> CancelBookingAsync(int bookingId, string reason = "")
+    /// <summary>Скасовує бронювання (Pending/Confirmed → Cancelled), номер → Available.</summary>
+    public async Task<Booking> CancelBookingAsync(int id, string reason = "")
     {
-        var booking = await GetOrThrowAsync(bookingId);
-        booking.Cancel(reason);
-
-        var room = await _uow.Rooms.GetByIdAsync(booking.RoomId);
+        var b = await GetOrThrow(id);
+        var prev = b.Status;
+        b.Cancel(reason);
+        var room = await _uow.Rooms.GetByIdAsync(b.RoomId);
         if (room != null && room.Status == RoomStatus.Reserved)
         {
             room.SetStatus(RoomStatus.Available);
             await _uow.Rooms.UpdateAsync(room);
         }
-
-        await _uow.Bookings.UpdateAsync(booking);
+        await _uow.Bookings.UpdateAsync(b);
         await _uow.SaveAsync();
-        return booking;
+        await NotifyAsync(new BookingEvent(b.Id, b.Status, prev, DateTime.UtcNow, reason));
+        return b;
     }
 
+    /// <summary>Повертає всі бронювання (read-only).</summary>
     public async Task<IReadOnlyList<Booking>> GetAllBookingsAsync() =>
         await _uow.Bookings.GetAllAsync();
 
-    public async Task<IReadOnlyList<Booking>> GetGuestBookingsAsync(int guestId) =>
-        await _uow.Bookings.GetByGuestIdAsync(guestId);
-
+    /// <summary>Повертає бронювання за Id або null, якщо не знайдено.</summary>
     public async Task<Booking?> GetBookingAsync(int id) =>
         await _uow.Bookings.GetByIdAsync(id);
 
-    private async Task<Booking> GetOrThrowAsync(int id) =>
+    private async Task<Booking> GetOrThrow(int id) =>
         await _uow.Bookings.GetByIdAsync(id) ?? throw new BookingNotFoundException(id);
+
+    /// <summary>
+    /// Публікує подію всім зареєстрованим observer-ам. Помилки в handlers
+    /// не перериваюсь основну операцію — лише логуються в stderr.
+    /// </summary>
+    private async Task NotifyAsync(BookingEvent evt)
+    {
+        foreach (var h in _handlers)
+        {
+            try { await h.HandleAsync(evt); }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"[WARN] Event handler failed: {ex.Message}");
+            }
+        }
+    }
 }
