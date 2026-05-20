@@ -1,4 +1,3 @@
-using Xunit;
 using HotelBooking.Domain.Entities;
 using HotelBooking.Domain.Services;
 

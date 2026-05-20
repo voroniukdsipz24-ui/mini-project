@@ -1,11 +1,9 @@
-using Xunit;
 using HotelBooking.Application.Services;
 using HotelBooking.Domain.Entities;
 using HotelBooking.Domain.Exceptions;
 using HotelBooking.Domain.Services;
 using HotelBooking.Infrastructure;
 using HotelBooking.Tests.Fakes;
-using HotelBooking.Domain.Interfaces;
 
 namespace HotelBooking.Tests;
 
