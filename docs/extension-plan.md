@@ -1,90 +1,114 @@
 # Extension Plan — Самостійна 29
 
-## Мета розширень
-Закрити три виявлені прогалини курсу через осмислені розширення, а не випадкові "додаткові фічі".
+> Три **залежні** розширення (А → Б → В): кожне використовує результат попереднього.
+
+## Загальний контекст
+
+`docs/performance-analysis.md` вже виявив: **звіт ТОП-гостей** — найгарячіша точка системи.
+Без кешу при кожному відкритті сторінки «Звіти» весь обсяг бронювань заново
+сканується, групується, агрегується. На тестових даних це 8 мс, але:
+
+- При **сотні запитів за секунду** (декілька адміністраторів одночасно) — це 800 мс CPU/с
+- Дані змінюються рідко (зміни статусу), читання — часто
+- Без invalidation кеш буде stale
+
+Висновок: потрібен **TTL-кеш з event-based invalidation**.
 
 ---
 
-## Розширення 1: Custom LINQ Extensions
+## Розширення А — Generic MemoryCache\<TKey, TValue\>
 
-**Проблема**: Фільтрація бронювань повторюється у кількох місцях.  
-**Рішення**: `BookingExtensions.cs` — методи розширення для `IEnumerable<Booking>`.
+### Що додається
+Generic утиліта в `HotelBooking.Application/Caching/MemoryCache.cs`:
+- `Task<TValue> GetOrAddAsync(TKey, Func<Task<TValue>>, TimeSpan?)` — атомарне отримання
+- `void Invalidate(TKey)` — інвалідація конкретного ключа
+- `void Clear()` — повна очистка
+- Внутрішня структура: `ConcurrentDictionary<TKey, CacheEntry>` з TTL
 
-```csharp
-// src/HotelBooking.Application/Extensions/BookingExtensions.cs
-public static class BookingExtensions
-{
-    public static IEnumerable<Booking> Active(this IEnumerable<Booking> bookings) =>
-        bookings.Where(b => b.Status is BookingStatus.Confirmed or BookingStatus.CheckedIn);
+### Прогалини курсу що закриває
+- ✅ **Generic utility** (раніше було лише `JsonRepositoryBase<T>`)
+- ✅ **HashSet/ConcurrentDictionary** (раніше було лише `List<T>` / `Dictionary<T>`)
+- ✅ Делегати `Func<Task<TValue>>` як параметр (раніше лише в LINQ-лямбдах)
 
-    public static IEnumerable<Booking> ForPeriod(
-        this IEnumerable<Booking> bookings, DateTime from, DateTime to) =>
-        bookings.Where(b => b.CheckInDate < to && b.CheckOutDate > from);
-
-    public static decimal TotalRevenue(this IEnumerable<Booking> bookings) =>
-        bookings.Where(b => b.Status is not BookingStatus.Cancelled)
-                .Sum(b => b.TotalPrice);
-
-    public static IEnumerable<Booking> ForRoom(
-        this IEnumerable<Booking> bookings, int roomId) =>
-        bookings.Where(b => b.RoomId == roomId);
-}
-```
-
-**Де використовується**: ReportService (спрощення запитів), BookingService (перевірка конфліктів).
+### Тести
+- Базові: get-or-add, hit, miss
+- TTL expiration
+- Invalidation одного ключа
+- Thread safety (паралельний доступ)
 
 ---
 
-## Розширення 2: Observer — Booking Events
+## Розширення Б — Cache invalidation через Observer
 
-**Проблема**: Немає механізму реакції на зміну статусу бронювання.  
-**Рішення**: `IBookingEventHandler` + `BookingEventDispatcher`.
+### Що додається
+Новий `IBookingEventHandler`: `CacheInvalidationHandler` — слухає події BookingService
+і викликає `Invalidate(...)` на кеші коли стан змінився.
+
+Делегат `Action<string>` (або `Func<BookingEvent, IEnumerable<string>>`) визначає
+**стратегію інвалідації**: які ключі інвалідувати на яку подію. Це дозволяє
+підключити різні політики без зміни Handler.
 
 ```csharp
-// src/HotelBooking.Domain/Events/
-public record BookingStatusChanged(int BookingId, BookingStatus OldStatus, BookingStatus NewStatus);
-
-public interface IBookingEventHandler
+public class CacheInvalidationHandler : IBookingEventHandler
 {
-    Task HandleAsync(BookingStatusChanged evt);
-}
-
-// src/HotelBooking.Application/Services/
-public class ConsoleAuditHandler : IBookingEventHandler
-{
-    public Task HandleAsync(BookingStatusChanged evt)
-    {
-        Console.WriteLine($"[AUDIT] Booking #{evt.BookingId}: {evt.OldStatus} → {evt.NewStatus}");
-        return Task.CompletedTask;
-    }
+    private readonly IMemoryCache _cache;
+    private readonly Func<BookingEvent, IEnumerable<string>> _invalidationStrategy;
+    // на кожну подію викликаємо стратегію → отримуємо ключі → інвалідуємо
 }
 ```
 
-**Де підключається**: BookingService отримує `IEnumerable<IBookingEventHandler>` і диспетчеризує після зміни статусу.
+`ReportService.GetTopGuestsAsync` обгортається у `GetOrAddAsync("top-guests-5", ...)`.
+
+### Прогалини курсу що закриває
+- ✅ **Делегати як стратегія/політика** (`Func<BookingEvent, IEnumerable<string>>`)
+- ✅ Інтеграція з існуючим Observer pattern (Lab 37) — реальний use case
+- ✅ Cache invalidation як архітектурна проблема — у `extension-report.md`
+
+### Тести
+- Створення бронювання → кеш ТОП-гостей інвалідовано
+- Кеш статей не інвалідується від подій що його не торкаються
+- Стратегія через делегат: різні стратегії — різні набори інвалідованих ключів
 
 ---
 
-## Розширення 3: Decorator — Logging Service
+## Розширення В — Параметризовані performance-тести
 
-**Проблема**: Логування розкидане по коду.  
-**Рішення**: `LoggingBookingService` — Decorator навколо `BookingService`.
+### Що додається
+Новий тест-клас `PerformanceTests` з замірами:
 
-```csharp
-public class LoggingBookingService : BookingService
-{
-    private readonly BookingService _inner;
-    private readonly TextWriter _log;
+1. **Cold path** (без кешу) vs **warm path** (з кешем) — асерт що warm < cold/5
+2. **Theory з різними обсягами**: 100, 1000, 10000 бронювань — асерт верхньої межі мс
+3. Тест на інвалідацію: після події кеш miss-ить → cold path знову
 
-    public LoggingBookingService(BookingService inner, TextWriter log)
-        : base(null!) { _inner = inner; _log = log; }
+Це не повноцінний BenchmarkDotNet (overkill для навчального проєкту), але **реальні
+замірювання у тестовому фреймворку** з `Stopwatch` і `[Theory] [InlineData]`.
 
-    public new async Task<Booking> CreateBookingAsync(
-        int guestId, int roomId, DateTime checkIn, DateTime checkOut)
-    {
-        await _log.WriteLineAsync($"[{DateTime.UtcNow:O}] CreateBooking: G{guestId} R{roomId}");
-        var result = await _inner.CreateBookingAsync(guestId, roomId, checkIn, checkOut);
-        await _log.WriteLineAsync($"[{DateTime.UtcNow:O}] Created #{result.Id}");
-        return result;
-    }
-}
+### Прогалини курсу що закриває
+- ✅ **Параметризовані тести з performance** (Theory + різні обсяги)
+- ✅ Фактичні замірювання, а не теоретичні цифри
+- ✅ Регресійний захист — якщо хтось зламає кеш, тест впаде
+
+---
+
+## Залежності між розширеннями
+
 ```
+        А: MemoryCache<TKey, TValue>
+                  ↓
+     (без А Б не має на чому працювати)
+                  ↓
+        Б: CacheInvalidationHandler + delegate strategy
+                  ↓
+        (без Б тест В на invalidation неможливий)
+                  ↓
+        В: Параметризовані performance-тести
+```
+
+## Що оновиться у документації
+
+- ✅ `docs/extension-report.md` — фінальний звіт по 3 розширеннях
+- ✅ `docs/syllabus-coverage.md` — закриваємо generic utility, делегати-стратегію, perf-тести
+- ✅ `docs/performance-analysis.md` — додаємо секцію "After caching"
+- ✅ `DEMO.md` — додаємо сценарій з демонстрацією що звіти повторно швидші
+- ✅ `FINAL_REPORT.md` — оновлюємо secition «Що зробив би інакше»
+- ✅ `CHANGELOG.md` — v1.1.0
