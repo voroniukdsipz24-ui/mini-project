@@ -1,3 +1,4 @@
+using HotelBooking.Application.Caching;
 using HotelBooking.Domain.Entities;
 using HotelBooking.Domain.Interfaces;
 
@@ -10,11 +11,21 @@ public record OccupancyReport(
 
 public record RoomTypeReport(RoomType Type, int Bookings, decimal Revenue, double AvgNights);
 
+/// <summary>
+/// Сервіс аналітичних звітів. Підтримує опціональний кеш через <see cref="IMemoryCache{TKey, TValue}"/>:
+/// якщо інжектовано — найгарячіший запит (TopGuests) memoize-ться за ключем.
+/// Без кешу — fallback на пряме обчислення (default behaviour, не ламає старі тести).
+/// </summary>
 public class ReportService
 {
     private readonly IUnitOfWork _uow;
+    private readonly IMemoryCache<string, object>? _cache;
 
-    public ReportService(IUnitOfWork uow) => _uow = uow;
+    public ReportService(IUnitOfWork uow, IMemoryCache<string, object>? cache = null)
+    {
+        _uow = uow;
+        _cache = cache;
+    }
 
     public async Task<OccupancyReport> GetOccupancyReportAsync(DateTime from, DateTime to)
     {
@@ -59,7 +70,26 @@ public class ReportService
             .AsReadOnly();
     }
 
+    /// <summary>
+    /// ТОП-N гостей за витратами. Кешується якщо <see cref="IMemoryCache{TKey, TValue}"/>
+    /// інжектовано. Ключ: $"top-guests-{top}". Інвалідація — через
+    /// CacheInvalidationHandler на події IBookingEventHandler.
+    /// </summary>
     public async Task<IReadOnlyList<(Guest Guest, int Bookings, decimal Spent)>> GetTopGuestsAsync(int top = 5)
+    {
+        string cacheKey = $"top-guests-{top}";
+
+        if (_cache != null)
+        {
+            var cached = await _cache.GetOrAddAsync(cacheKey,
+                async () => (object) await ComputeTopGuestsAsync(top));
+            return (IReadOnlyList<(Guest, int, decimal)>) cached;
+        }
+
+        return await ComputeTopGuestsAsync(top);
+    }
+
+    private async Task<IReadOnlyList<(Guest Guest, int Bookings, decimal Spent)>> ComputeTopGuestsAsync(int top)
     {
         var bookings = await _uow.Bookings.GetAllAsync();
         var guests   = await _uow.Guests.GetAllAsync();

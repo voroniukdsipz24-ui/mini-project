@@ -10,13 +10,30 @@ var builder = WebApplication.CreateBuilder(args);
 string dataDir = Path.Combine(builder.Environment.ContentRootPath, "data");
 var uow = new JsonUnitOfWork(dataDir);
 
+// Самостійна 29: generic кеш + invalidation handler.
+// Кеш memoize-ть ReportService.GetTopGuestsAsync; handler інвалідує його на події бронювань.
+var reportCache = new HotelBooking.Application.Caching.MemoryCache<string, object>(
+    defaultTtl: TimeSpan.FromMinutes(5));
+builder.Services.AddSingleton<HotelBooking.Application.Caching.IMemoryCache<string, object>>(reportCache);
+
+// Observer: реєструємо файловий аудит-лог.
+builder.Services.AddSingleton<IBookingEventHandler>(new FileAuditLogHandler(dataDir));
+
+// Observer: cache-invalidation. Слухає ті самі події і інвалідує ТОП-гостей.
+builder.Services.AddSingleton<IBookingEventHandler>(
+    HotelBooking.Application.Services.CacheInvalidationHandler.Default(reportCache));
+
 // Singleton: репозиторії містять in-memory колекції — спільний стан між запитами.
 // Application services не мають власного стану — Singleton безпечний.
 builder.Services.AddSingleton<IUnitOfWork>(uow);
-builder.Services.AddSingleton(sp => new BookingService(sp.GetRequiredService<IUnitOfWork>()));
+builder.Services.AddSingleton(sp => new BookingService(
+    sp.GetRequiredService<IUnitOfWork>(),
+    sp.GetServices<IBookingEventHandler>()));
 builder.Services.AddSingleton(sp => new RoomSearchService(sp.GetRequiredService<IUnitOfWork>()));
 builder.Services.AddSingleton(sp => new GuestService(sp.GetRequiredService<IUnitOfWork>()));
-builder.Services.AddSingleton(sp => new ReportService(sp.GetRequiredService<IUnitOfWork>()));
+builder.Services.AddSingleton(sp => new ReportService(
+    sp.GetRequiredService<IUnitOfWork>(),
+    sp.GetRequiredService<HotelBooking.Application.Caching.IMemoryCache<string, object>>()));
 
 builder.Services.AddCors(o => o.AddDefaultPolicy(p =>
     p.AllowAnyOrigin().AllowAnyMethod().AllowAnyHeader()));
