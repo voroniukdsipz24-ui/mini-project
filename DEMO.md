@@ -141,3 +141,26 @@ dotnet run --project src/HotelBooking.Console
 ```
 
 Той самий бекенд (Application/Domain/Infrastructure), інший presentation. Доводить **Dependency Inversion Principle** на практиці.
+
+---
+
+## Самостійна 29: Demo — кеш ТОП-гостей
+
+### Сценарій (1 хв)
+1. Перейти у «Звіти» → ТОП-гості завантажуються (cold path — UoW сканує всі бронювання)
+2. Натиснути F5 (refresh) → ТОП-гості вже з кешу (warm path — миттєво)
+3. Створити нове бронювання у «+ Нове замовлення»
+4. Назад у «Звіти» → виклик знову cold (кеш інвалідувався через `CacheInvalidationHandler`)
+
+### Що показати в коді
+- `src/HotelBooking.Application/Caching/MemoryCache.cs` — generic утиліта з `Lazy<Task<T>>`
+- `src/HotelBooking.Application/Services/CacheInvalidationHandler.cs` — handler з делегат-стратегією
+- `src/HotelBooking.Web/Program.cs` — DI композиція без зміни Domain
+
+### Що показати в тестах
+```bash
+dotnet test --filter "FullyQualifiedName~PerformanceTests"
+```
+- Cold path: ~12 мс на 5000 бронювань
+- 10 warm викликів: ~0.2 мс
+- Прискорення: ~50× для повторних запитів

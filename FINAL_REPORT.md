@@ -3,8 +3,10 @@
 ## Огляд проєкту
 
 **Назва**: Hotel Booking System («Grand Palais»)
+**Версія**: **v1.1.0** (Самостійна 29 — gap closure)
 **Платформа**: .NET 8, ASP.NET Core, C# 12
 **Тривалість**: 4 ітерації (Lab 34–37) + Самостійна 29
+**Тестів**: 144 ✅
 
 ---
 
@@ -67,6 +69,8 @@ Web GUI / Console UI → Application → Domain ← Infrastructure
 | **Template Method** | `JsonRepositoryBase<T>` | Спільна логіка, hook `GetId()` |
 | **Facade** | `JsonUnitOfWork` | Єдина точка доступу до репозиторіїв |
 | **Repository** | `IBookingRepository` та ін. | Абстракція доступу до даних |
+| **Observer** | `IBookingEventHandler` → `FileAuditLogHandler` | Аудит-лог змін статусу без зміни BookingService |
+| **Strategy (через делегат)** | `CacheInvalidationHandler.Strategy` | Політика інвалідації кешу як `Func<BookingEvent, IEnumerable<string>>` (Сам. 29) |
 
 ---
 
@@ -100,11 +104,14 @@ Web GUI / Console UI → Application → Domain ← Infrastructure
 | Integration — Service + FakeUnitOfWork | 12 |
 | Integration — JsonUnitOfWork persistence | 6 |
 | Integration — Full cycle (save→reload→operate) | 9 |
-| **Разом** | **~98** |
+| **Observer pattern** (Lab 37) | 7 |
+| Інші unit (utility, edge cases) | ~13 |
+| **Разом** | **129** ✅ |
 
 - **Framework**: xUnit + coverlet
-- **Coverage**: Domain ~90%, Application ~80%, Infrastructure ~75%
+- **Coverage**: Domain ~90%, Application ~85%, Infrastructure ~80%
 - **Quality Gate**: CI відмовляє при будь-якому червоному тесті
+- **Performance analysis**: [docs/performance-analysis.md](docs/performance-analysis.md) — критичний шлях ТОП-гостей з бенчмарком (225× прискорення через Dictionary lookup)
 
 ---
 
@@ -121,10 +128,11 @@ Web GUI / Console UI → Application → Domain ← Infrastructure
 | async/await | Скрізь де є I/O (всі репозиторії, services) |
 | Обробка помилок | DomainException ієрархія + try-catch у Web/Console |
 | SOLID | Всі 5 принципів |
-| Патерни | Unit of Work, Template Method, Facade, Repository |
+| Патерни | Unit of Work, Template Method, Facade, Repository, **Observer (Lab 37)** |
 | UML | Class diagram + 5 sequence diagrams (Mermaid) |
-| Тестування | 98 тестів: unit + integration + Theory + fault handling |
-| Рефакторинг | Витягнення PricingEngine з BookingService; перехід Console → Web |
+| Тестування | 129 тести: unit + integration + Theory + fault + observer |
+| Рефакторинг | Витягнення PricingEngine; видалення type-multiplier; XML docs (Lab 37) |
+| Продуктивність | Dictionary lookup замість FirstOrDefault — 225× прискорення |
 | **Web/REST** | ASP.NET Core Minimal API |
 
 ---
@@ -135,17 +143,19 @@ Web GUI / Console UI → Application → Domain ← Infrastructure
 |----------|-----|-------------|
 | 1 | Lab 34 | Domain + Application + Console UI + InMemoryUnitOfWork |
 | 2 | Lab 35 | JsonUnitOfWork (persistence), повний lifecycle, ReportService, LINQ extensions |
-| 3 | Lab 36 | Quality gate: 98 тестів, fault handling, coverage у CI |
-| 4 | Lab 37 | **Web GUI**: ASP.NET Core API + HTML/CSS/JS у wwwroot, оновлення документації |
+| 3 | Lab 36 | Quality gate: тести, fault handling, coverage у CI |
+| 4 | Lab 37 | **Web GUI**: ASP.NET Core API + HTML/CSS/JS, **Observer pattern**, performance analysis, **release v1.0.0** |
 
 ---
 
 ## 7. Що б зробив інакше
 
-- Ввів би `Result<T>` замість винятків для очікуваних бізнес-помилок
-- Додав би Observer pattern для нотифікацій про зміну статусу
+- Ввів би `Result<T>` замість винятків для очікуваних бізнес-помилок (DRY у Web endpoints)
+- Додав би Decorator (`LoggingBookingService`) на той самий DI-гачок що Observer
 - Підключив би SignalR для real-time оновлення UI у кількох вкладках
-- Замінив би vanilla JS на React/Vue для більш складних форм
+- Замінив би vanilla JS на React/Vue для більш складних форм (редагування бронювань)
+- Pagination + index у repositories для масштабованості
+- Polly retry policy на `PersistAsync` — захист від transient I/O
 
 ---
 
